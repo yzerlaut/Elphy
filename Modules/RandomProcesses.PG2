@@ -1,0 +1,110 @@
+UNIT RandomProcesses;
+
+INTERFACE
+
+procedure GaussianWhiteNoise(var vec:Tvector; mu, sigma : real; seed : integer; doc:string); {Box Muller}
+
+procedure OrnsteinUhlenbeckNoise(var vec:Tvector; mu, sigma, tau : real; seed : integer); {Integration of white noise with drift}
+
+
+IMPLEMENTATION
+
+procedure GaussianWhiteNoise(var vec:Tvector; mu, sigma : real; seed:integer; doc:string);
+{Fills a vector 'vec' with a gaussian white noise of mean 'mu'
+and standard deviation 'sigma', you need to set the seed that
+generate the random process through the integer 'seed'
+
+algorithm : BOX-MULLER
+http://fr.wikipedia.org/wiki/M%C3%A9thode_de_Box-Muller
+
+-------------------------- USE ------------------------------
+
+Example, you want to use it in continuous mode to recursively fill
+your analog intput with white noise. You'll need to define an intermediate 
+procedure before putting it in the 'BuildEp'.
+
+
+var mu, sigma : real ;  //global variable in your program set by the GUI for example
+procedure Build_WhiteNoise(seq:longint;var vec:Tvector); 
+begin
+    GaussianWhiteNoise(vec, mu, sigma, seq); // i use the seg index as the seed !!
+end;
+// then you can set the procedure of the stimulation
+stimulator.Channels[1].BuildEp := Build_WhiteNoise ;
+}
+var ii:integer; x, y, u1, u2 : real ;
+begin
+   doc := '';
+   doc := doc+'Fills a vector VEC with a gaussian white noise of mean MU';
+   doc := doc+'and standard deviation SIGMA, you need to set the seed that ';
+   setRandSeed(seed);
+   ii:=vec.Istart ;
+   while ii<vec.Iend do {until they're all filled}
+   begin
+      u1 :=Random ;
+      u2 :=Random ;
+      if (u1>0) and (u2>0) then 
+      begin
+         x:= SQRT(-2*LN(u1))*COS(2*PI*u2);
+         y:= SQRT(-2*LN(u1))*SIN(2*PI*u2);
+         vec[ii]:= mu+sigma*x;
+         if ii<vec.Iend then vec[ii+1]:=mu+sigma*y;
+         ii:=ii+2;
+      end;
+   end;
+end;
+
+
+
+procedure OrnsteinUhlenbeckNoise(var vec:Tvector; mu, sigma, tau : real; seed : integer);
+{Fills a vector 'vec' with a Ornstein Uhlenbeck noise of mean 'mu', 
+standard deviation 'sigma' and autocorrelation time 'tau',
+you need to set the seed that generate the random process through the integer 'seed'
+
+http://en.wikipedia.org/wiki/Ornstein%E2%80%93Uhlenbeck_process
+
+
+METHOD : we just integrate in time a gaussian white noise
+with a drift force toward the mean !  
+
+-------------------------- USE ------------------------------
+
+Example, you want to use it in continuous mode to recursively fill
+your analog output with white noise. You'll need to define an intermediate 
+procedure to put in the 'BuildEp'.
+
+
+var mu, sigma, tau : real ;  //global variable in youor program set by the GUI for example
+procedure Build_OU_Noise(seq:longint;var vec:Tvector); 
+begin
+    OrnsteinUhlenbeckNoise(vec, mu, sigma, tau, seq); // i use the seg index as the seed !!
+end;
+// then you can set the procedure of the stimulation
+stimulator.Channels[1].BuildEp := Build_OU_Noise ;
+
+====== BE CAREFUL ======
+the autocorrelation time constant has a unit !!!!
+and in Elphy, Episodes are in ms, whereas Continuous mode is in seconds
+so you will need to adapt the unit of the time constant accordingly !!!!
+}
+var whitenoise : Tvector ; jj:integer; DT, A, diffcoeff : real ; doc:string ;
+begin
+   // we generate gaussian white noise of 0 mean and unit variance!
+   whitenoise.create;
+   whitenoise.copyobject(vec, False);
+   GaussianWhiteNoise(whitenoise, 0.0, 1.0, seed, doc);
+   diffcoeff := 2.*sigma*sigma/tau ; // diffusion coefficient
+   DT:= vec.ConvX(vec.Istart+1)-vec.ConvX(vec.Istart); // time step in s
+   A := SQRT(diffcoeff*tau/2.*(1-EXP(-2*DT/tau)));
+   vec[vec.Istart]:=mu; // we start the integration from the mean (arbitrary ! so potentially problematic)
+   // we could also pass an initial value as an argument
+   
+   // then we perform the time integration
+   for jj:=vec.Istart to vec.Iend-1 do
+    begin
+        vec[jj+1] := mu +(vec[jj]-mu)*EXP(-DT/tau)+A*whitenoise[jj];    
+   end;
+end;
+
+
+end.
